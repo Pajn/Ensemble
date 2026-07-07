@@ -790,6 +790,7 @@ class ExpandablePlayerState extends State<ExpandablePlayer>
         currentIndex: _queue!.currentIndex,
         shuffleEnabled: newShuffleState,
         repeatMode: _queue!.repeatMode,
+        playbackSpeed: _queue!.playbackSpeed,
       );
     });
 
@@ -829,12 +830,79 @@ class ExpandablePlayerState extends State<ExpandablePlayer>
         currentIndex: _queue!.currentIndex,
         shuffleEnabled: _queue!.shuffleEnabled,
         repeatMode: nextMode,
+        playbackSpeed: _queue!.playbackSpeed,
       );
     });
 
     final maProvider = context.read<MusicAssistantProvider>();
     await maProvider.setRepeatMode(_queue!.playerId, nextMode);
     await _loadQueue();
+  }
+
+  Future<void> _setPlaybackSpeed(double speed) async {
+    if (_queue == null) return;
+    final clampedSpeed = speed.clamp(0.5, 2.0).toDouble();
+
+    setState(() {
+      _queue = PlayerQueue(
+        playerId: _queue!.playerId,
+        items: _queue!.items,
+        currentIndex: _queue!.currentIndex,
+        shuffleEnabled: _queue!.shuffleEnabled,
+        repeatMode: _queue!.repeatMode,
+        playbackSpeed: clampedSpeed,
+      );
+    });
+
+    final maProvider = context.read<MusicAssistantProvider>();
+    try {
+      await maProvider.setPlaybackSpeed(_queue!.playerId, clampedSpeed);
+      await _loadQueue();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to set playback speed')),
+      );
+      await _loadQueue();
+    }
+  }
+
+  Future<void> _showPlaybackSpeedPicker() async {
+    if (_queue == null) return;
+    final speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    final queueSpeed = _queue!.speed;
+
+    final selectedSpeed = await showModalBottomSheet<double>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              const Text(
+                'Playback speed',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              ...speeds.map((speed) {
+                final isSelected = (queueSpeed - speed).abs() < 0.001;
+                return ListTile(
+                  title: Text(_formatSpeedLabel(speed)),
+                  trailing: isSelected ? const Icon(Icons.check_rounded) : null,
+                  onTap: () => Navigator.of(context).pop(speed),
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selectedSpeed == null) return;
+    await _setPlaybackSpeed(selectedSpeed);
   }
 
   void _toggleQueuePanel() {
@@ -2098,6 +2166,7 @@ class ExpandablePlayerState extends State<ExpandablePlayer>
     final textColor60 = textColor.withOpacity(MiniPlayerLayout.secondaryTextOpacity);
     final textColor70 = textColor.withOpacity(0.7);
     final textColor45 = textColor.withOpacity(0.45);
+    final queueSpeed = _queue?.speed ?? 1.0;
     final primaryColor20 = primaryColor.withOpacity(0.2);
     final primaryColor70 = primaryColor.withOpacity(0.7);
 
@@ -3170,7 +3239,7 @@ class ExpandablePlayerState extends State<ExpandablePlayer>
                   ),
 
                 // Utility row - positioned from top like volume, rises with player expansion
-                // Contains favourite, lyrics, queue, sleep buttons (alphabetical order)
+                // Contains favourite, lyrics, queue, sleep, speed buttons (alphabetical order)
                 if (t > 0.5)
                   Positioned(
                     left: 0,
@@ -3218,6 +3287,15 @@ class ExpandablePlayerState extends State<ExpandablePlayer>
                             activeColor: primaryColor,
                             textColor: textColor,
                             onPressed: _toggleSleepTimerPanel,
+                          ),
+                          // Playback speed button
+                          _buildUtilityButton(
+                            icon: Icons.speed_rounded,
+                            label: _formatSpeedLabel(queueSpeed),
+                            isActive: queueSpeed != 1.0,
+                            activeColor: primaryColor,
+                            textColor: textColor,
+                            onPressed: _showPlaybackSpeedPicker,
                           ),
                         ],
                       ),
@@ -3794,6 +3872,13 @@ class ExpandablePlayerState extends State<ExpandablePlayer>
 
   double _lerpDouble(double a, double b, double t) {
     return a + (b - a) * t;
+  }
+
+  String _formatSpeedLabel(double speed) {
+    final normalized = speed.toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+    return '${normalized}x';
   }
 
   Widget _buildUtilityButton({
